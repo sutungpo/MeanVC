@@ -104,7 +104,11 @@ class Trainer:
                         cfg_uncond='u',
                         p=self.args.p,)
         
-
+        self.vocos = Vocos.load_selfckpt("/vc_10ms/version_0").to(self.accelerator.device)
+        self.sv_model = init_model('wavlm_large', '/test/smos/ckpt/wavlm_large_finetune.pth')
+        self.sv_model.to(self.accelerator.device).eval()
+        self.asr_model = load_zh_model(str(self.accelerator.device))
+        
         if self.is_main:
             self.ema_model = EMA(model, include_online_model=False, **ema_kwargs)
 
@@ -147,8 +151,8 @@ class Trainer:
         warmup_steps = (
             self.num_warmup_updates * self.accelerator.num_processes
         )
-        total_steps = len(self.train_dataloader) * self.epochs / self.grad_accumulation_steps
-        total_steps = 3000000 * self.accelerator.num_processes
+        total_steps = (len(self.train_dataloader) * self.epochs) // self.grad_accumulation_steps
+        # total_steps = 3000000 * self.accelerator.num_processes
         decay_steps = total_steps - warmup_steps
         warmup_scheduler = LinearLR(self.optimizer, start_factor=1e-4, end_factor=1.0, total_iters=warmup_steps)
         decay_scheduler = LinearLR(self.optimizer, start_factor=1.0, end_factor=0.1, total_iters=decay_steps)
@@ -240,20 +244,15 @@ class Trainer:
         self.model.eval()
         
         model = self.accelerator.unwrap_model(self.model)
-        vocos = Vocos.load_selfckpt("/vc_10ms/version_0").to(self.model.device)
         spks_file = "/val/spks.lst"
         bn_file = "/val/bn/bn_40ms_160ms.scp"
         text_path = "/val/text.txt"
         prompt_dir = "/val/mels_10ms"
         
         # smos
-        sv_model = init_model('wavlm_large', '/test/smos/ckpt/wavlm_large_finetune.pth')
-        sv_model.eval()
-        sv_model.to(self.model.device)
         ssmi_dict = {}
         
         # cer
-        asr_model = load_zh_model(str(self.model.device))
         wer_dict = {}
         utt2txt = {}
         text_all = ''
@@ -268,7 +267,7 @@ class Trainer:
         steps = self.args.steps
         chunk_size = self.args.chunk_size
         cfg_strength = self.args.cfg_strength
-        time_points = torch.linspace(1.0, 0.0, steps + 1, device=self.model.device)
+        time_points = torch.linspace(1.0, 0.0, steps + 1, device=self.accelerator.device)
          
         with torch.no_grad():
             for i, spk in enumerate(spks):
@@ -279,7 +278,7 @@ class Trainer:
                 # load prompt mel
                 prompt_path = os.path.join(prompt_dir, spk_filename + ".npy")
                 prompt_mel = np.load(prompt_path)
-                prompt_mel = torch.from_numpy(prompt_mel).to(self.model.device)
+                prompt_mel = torch.from_numpy(prompt_mel).to(self.accelerator.device)
                 prompt_mel = prompt_mel.unsqueeze(0)
                 if prompt_mel.shape[1] == 80:
                     prompt_mel = prompt_mel.transpose(1, 2)
@@ -288,12 +287,12 @@ class Trainer:
                 spk_result_dir = os.path.join(self.args.result_dir, self.expname, str(step), spk_filename)
                 os.makedirs(spk_result_dir, exist_ok=True)
                 spk_emb = np.load(spk)
-                spk_emb = torch.from_numpy(spk_emb).to(self.model.device)
+                spk_emb = torch.from_numpy(spk_emb).to(self.accelerator.device)
                 if len(spk_emb.shape) == 1:
                     spk_emb = spk_emb.unsqueeze(0)
                 
                 for bn_path in bns:
-                    bn = torch.from_numpy(np.load(bn_path)).to(self.model.device)
+                    bn = torch.from_numpy(np.load(bn_path)).to(self.accelerator.device)
                     bn = bn.unsqueeze(0)
                     bn = bn.transpose(1, 2)
                     bn_interpolate = torch.nn.functional.interpolate(bn, size=int(bn.shape[2] * 4), mode='linear', align_corners=True)
@@ -315,8 +314,8 @@ class Trainer:
                         if chunk_id == 0:
                             cache = None
                         
-                        x = torch.randn(bn_chunk.shape[1], 80, device=self.model.device, dtype=bn_chunk.dtype).unsqueeze(0)
-                        cfg_mask = torch.ones([x.shape[0]], dtype=torch.bool, device=self.model.device)
+                        x = torch.randn(bn_chunk.shape[1], 80, device=self.accelerator.device, dtype=bn_chunk.dtype).unsqueeze(0)
+                        cfg_mask = torch.ones([x.shape[0]], dtype=torch.bool, device=self.accelerator.device)
                         
                         for i in range(steps):
                             t = time_points[i]
@@ -356,20 +355,20 @@ class Trainer:
                     
                     mel = x_pred.transpose(1,2)
                     mel = (mel + 1) / 2
-                    y_g_hat = vocos.decode(mel)
+                    y_g_hat = self.vocos.decode(mel)
                     wav_output_path = os.path.join(spk_result_dir, base_filename + ".wav")
                     torchaudio.save(wav_output_path, y_g_hat.cpu(), 16000)
                     # self.accelerator.log({f"audio_{spk_filename}_{base_filename}": wandb.Audio(wav_output_path, sample_rate=16000)}, step=step)
                     
                     # smi
                     with torch.no_grad():
-                        emb = sv_model(y_g_hat)
+                        emb = self.sv_model(y_g_hat)
                     ssmi = F.cosine_similarity(spk_emb, emb)
                     ssmi_list.append(ssmi.item()) 
                     
                     # cer
                     try:
-                        res = asr_model.generate(input=wav_output_path, batch_size_s=300)
+                        res = self.asr_model.generate(input=wav_output_path, batch_size_s=300)
                         transcription = res[0]["text"]
                         transcription = zhconv.convert(transcription, 'zh-cn')
                     except:
@@ -389,8 +388,6 @@ class Trainer:
             wer = wer_dict[spk_filename]
             self.accelerator.log({f"ssmi_{spk_filename}": ssmi_mean, f"wer_{spk_filename}": wer}, step=step)
         self.model.train()
-        del sv_model
-        del asr_model
         torch.cuda.empty_cache()       
                     
     def train(self, resumable_with_seed: int = None):
@@ -409,7 +406,7 @@ class Trainer:
         else:
             skipped_epoch = 0
         
-        print(self.model.device)
+        print(self.accelerator.device)
 
         for epoch in range(skipped_epoch, self.epochs):
             self.model.train()
