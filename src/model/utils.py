@@ -4,7 +4,7 @@ import os
 import random
 from collections import defaultdict
 from importlib.resources import files
-import matplotlib.pylab as plt
+# import matplotlib.pylab as plt
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
@@ -70,15 +70,16 @@ def default(v, d):
 
 
 def plot_spectrogram(spectrogram):
-    fig, ax = plt.subplots(figsize=(10, 2))
-    im = ax.imshow(spectrogram, aspect="auto", origin="lower",
-                   interpolation='none')
-    plt.colorbar(im, ax=ax)
+    # fig, ax = plt.subplots(figsize=(10, 2))
+    # im = ax.imshow(spectrogram, aspect="auto", origin="lower",
+    #                interpolation='none')
+    # plt.colorbar(im, ax=ax)
 
-    fig.canvas.draw()
-    plt.close()
+    # fig.canvas.draw()
+    # plt.close()
 
-    return fig
+    # return fig
+    pass
 
 
 # tensor helpers
