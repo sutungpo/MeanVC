@@ -93,6 +93,18 @@ class Trainer:
         print("!!!!!!!!!!!!!!!!!", self.precision)
 
         self.model = model
+        if self.args.initial_ckpt_path:
+            ckpt_path = self.args.initial_ckpt_path
+            ckpt_type = ckpt_path.split(".")[-1]
+            if ckpt_type == "safetensors":
+                from safetensors.torch import load_file
+                checkpoint = load_file(ckpt_path)
+            else:
+                checkpoint = torch.load(ckpt_path, weights_only=True)
+                checkpoint = checkpoint.state_dict()
+            self.model.load_state_dict(checkpoint, strict=True)
+        else:
+            ckpt_path = None
         
         self.args.flow_ratio
         

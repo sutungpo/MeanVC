@@ -46,7 +46,7 @@ def main():
         args.learning_rate,
         num_warmup_updates=args.num_warmup_updates,
         save_per_updates=args.save_per_updates,
-        checkpoint_path=str(files("src").joinpath(f"../../ckpts/{args.exp_name}")),
+        checkpoint_path=args.pretrained_ckpt_path,
         grad_accumulation_steps=args.grad_accumulation_steps,
         max_grad_norm=args.max_grad_norm,
         wandb_project="meanvc",
