@@ -104,8 +104,8 @@ class Trainer:
                         cfg_uncond='u',
                         p=self.args.p,)
         
-        self.vocos = Vocos.load_selfckpt("/vc_10ms/version_0").to(self.accelerator.device)
-        self.sv_model = init_model('wavlm_large', '/test/smos/ckpt/wavlm_large_finetune.pth')
+        self.vocos = torch.jit.load(args.vocoder_ckpt_path).to(self.accelerator.device)
+        self.sv_model = init_model('wavlm_large', args.walvm_ckpt_path)
         self.sv_model.to(self.accelerator.device).eval()
         self.asr_model = load_zh_model(str(self.accelerator.device))
         
@@ -166,7 +166,7 @@ class Trainer:
         self.scheduler = ConstantLR(self.optimizer, factor=1, total_iters=total_steps)
 
     def get_dataloader(self):
-        dd = DiffusionDataset(*DiffusionDataset.init_data(self.args.dataset_path), \
+        dd = DiffusionDataset(DiffusionDataset.init_data(self.args.dataset_path), \
                                 feature_list=self.args.feature_list, \
                                 additional_feature_list=self.args.additional_feature_list, \
                                 feature_pad_values=self.args.feature_pad_values, \

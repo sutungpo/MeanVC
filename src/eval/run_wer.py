@@ -20,8 +20,8 @@ punctuation_all = punctuation + string.punctuation
 # device = sys.argv[4]
 # text = sys.argv[5]
 
-def load_zh_model():
-    model = AutoModel(model="paraformer-zh")
+def load_zh_model(device):
+    model = AutoModel(model="paraformer-zh", device=device)
     return model
 
 def process_one(hypo, truth):
