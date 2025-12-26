@@ -162,7 +162,7 @@ class Trainer:
             self.num_warmup_updates * self.accelerator.num_processes
         )  # consider a fixed warmup steps while using accelerate multi-gpu ddp
         total_steps = len(self.train_dataloader) * self.epochs / self.grad_accumulation_steps
-        total_steps = 1000000 * self.accelerator.num_processes
+        # total_steps = 1000000 * self.accelerator.num_processes
         decay_steps = total_steps - warmup_steps
         warmup_scheduler = LinearLR(self.optimizer, start_factor=1e-4, end_factor=1.0, total_iters=warmup_steps)
         decay_scheduler = LinearLR(self.optimizer, start_factor=1.0, end_factor=0.2, total_iters=decay_steps)
@@ -175,7 +175,7 @@ class Trainer:
             self.num_warmup_updates * self.accelerator.num_processes
         )  # consider a fixed warmup steps while using accelerate multi-gpu ddp
         total_steps = len(self.train_dataloader) * self.epochs / self.grad_accumulation_steps
-        total_steps = 1000000 * self.accelerator.num_processes
+        # total_steps = 1000000 * self.accelerator.num_processes
         decay_steps = total_steps - warmup_steps
         warmup_scheduler = LinearLR(self.dis_optimizer, start_factor=1e-4, end_factor=1.0, total_iters=warmup_steps)
         decay_scheduler = LinearLR(self.dis_optimizer, start_factor=1.0, end_factor=0.2, total_iters=decay_steps)
@@ -189,7 +189,7 @@ class Trainer:
         self.scheduler = ConstantLR(self.optimizer, factor=1, total_iters=total_steps)
 
     def get_dataloader(self):
-        dd = DiffusionDataset(*DiffusionDataset.init_data(self.args.dataset_path), \
+        dd = DiffusionDataset(DiffusionDataset.init_data(self.args.dataset_path), \
                                 feature_list=self.args.feature_list, \
                                 additional_feature_list=self.args.additional_feature_list, \
                                 feature_pad_values=self.args.feature_pad_values, \
@@ -284,7 +284,7 @@ class Trainer:
         self.model.eval()
         
         model = self.accelerator.unwrap_model(self.model)
-        vocos = Vocos.load_selfckpt("/vc_10ms/version_0").to(self.model.device)
+        vocos = Vocos.load_selfckpt("/vc_10ms/version_0").to(self.accelerator.device)
         spks_file = "/val/spks.lst"
         bn_file = "/val/bn/bn_40ms_160ms.scp"
         text_path = "/val/text.txt"
@@ -293,11 +293,11 @@ class Trainer:
         # smos
         sv_model = init_model('wavlm_large', '/test/smos/ckpt/wavlm_large_finetune.pth')
         sv_model.eval()
-        sv_model.to(self.model.device)
+        sv_model.to(self.accelerator.device)
         ssmi_dict = {}
         
         # cer
-        asr_model = load_zh_model(str(self.model.device))
+        asr_model = load_zh_model(str(self.accelerator.device))
         wer_dict = {}
         utt2txt = {}
         text_all = ''
@@ -312,7 +312,7 @@ class Trainer:
         steps = self.args.steps
         chunk_size = self.args.chunk_size
         cfg_strength = self.args.cfg_strength
-        time_points = torch.linspace(1.0, 0.0, steps + 1, device=self.model.device)
+        time_points = torch.linspace(1.0, 0.0, steps + 1, device=self.accelerator.device)
          
         with torch.no_grad():
             for i, spk in enumerate(spks):
@@ -323,7 +323,7 @@ class Trainer:
                 # load prompt mel
                 prompt_path = os.path.join(prompt_dir, spk_filename + ".npy")
                 prompt_mel = np.load(prompt_path)
-                prompt_mel = torch.from_numpy(prompt_mel).to(self.model.device)
+                prompt_mel = torch.from_numpy(prompt_mel).to(self.accelerator.device)
                 prompt_mel = prompt_mel.unsqueeze(0)
                 if prompt_mel.shape[1] == 80:
                     prompt_mel = prompt_mel.transpose(1, 2)
@@ -332,12 +332,12 @@ class Trainer:
                 spk_result_dir = os.path.join(self.args.result_dir, self.expname, str(step), spk_filename)
                 os.makedirs(spk_result_dir, exist_ok=True)
                 spk_emb = np.load(spk)
-                spk_emb = torch.from_numpy(spk_emb).to(self.model.device)
+                spk_emb = torch.from_numpy(spk_emb).to(self.accelerator.device)
                 if len(spk_emb.shape) == 1:
                     spk_emb = spk_emb.unsqueeze(0)
                 
                 for bn_path in bns:
-                    bn = torch.from_numpy(np.load(bn_path)).to(self.model.device)
+                    bn = torch.from_numpy(np.load(bn_path)).to(self.accelerator.device)
                     bn = bn.unsqueeze(0)
                     bn = bn.transpose(1, 2)
                     bn_interpolate = torch.nn.functional.interpolate(bn, size=int(bn.shape[2] * 4), mode='linear', align_corners=True)
@@ -359,8 +359,8 @@ class Trainer:
                         if chunk_id == 0:
                             cache = None
                         
-                        x = torch.randn(bn_chunk.shape[1], 80, device=self.model.device, dtype=bn_chunk.dtype).unsqueeze(0)
-                        cfg_mask = torch.ones([x.shape[0]], dtype=torch.bool, device=self.model.device)
+                        x = torch.randn(bn_chunk.shape[1], 80, device=self.accelerator.device, dtype=bn_chunk.dtype).unsqueeze(0)
+                        cfg_mask = torch.ones([x.shape[0]], dtype=torch.bool, device=self.accelerator.device)
                         
                         for i in range(steps):
                             t = time_points[i]
@@ -453,7 +453,7 @@ class Trainer:
         else:
             skipped_epoch = 0
         
-        print(self.model.device)
+        print(self.accelerator.device)
 
         for epoch in range(skipped_epoch, self.epochs):
             self.model.train()
